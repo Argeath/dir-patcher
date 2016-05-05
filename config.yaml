@@ -1,0 +1,11 @@
+---
+configFile: config.yaml
+directories:
+  out: out/
+  new: new/
+  old: old/
+gzipCompression: 6
+tarFileName: newFiles
+createListFile: false
+createOnlyListFile: false
+pack: false

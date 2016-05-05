@@ -1,0 +1,40 @@
+---
+version: '1.0'
+updated:
+- _normalize.scss
+new:
+- elements/_elements.scss
+- elements/_lists.scss
+- elements/_tables.scss
+- forms/_buttons.scss
+- forms/_fields.scss
+- forms/_forms.scss
+- layout/_content-sidebar.scss
+- layout/_sidebar-content.scss
+- media/_captions.scss
+- media/_galleries.scss
+- media/_media.scss
+- mixins/_mixins-master.scss
+- modules/_accessibility.scss
+- modules/_alignments.scss
+- modules/_clearings.scss
+- modules/_infinite-scroll.scss
+- navigation/_links.scss
+- navigation/_menus.scss
+- navigation/_navigation.scss
+- site/primary/_asides.scss
+- site/primary/_comments.scss
+- site/primary/_posts-and-pages.scss
+- site/secondary/_widgets.scss
+- site/_site.scss
+- typography/_copy.scss
+- typography/_headings.scss
+- typography/_typography.scss
+- variables-site/_colors.scss
+- variables-site/_structure.scss
+- variables-site/_typography.scss
+- variables-site/_variables-site.scss
+removed_directories:
+- usuniety
+removed_files:
+- usuniety/removed.txt
