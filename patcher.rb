@@ -62,6 +62,8 @@ $options = {
     'pack' => false
 }
 
+$error = false
+
 def load_config
   if File.exist?($options['configFile']) and YAML::load_file($options['configFile'])
     YAML::load_file($options['configFile']).each do |key, value|
@@ -78,7 +80,7 @@ def load_config
     File.open($options['configFile'], 'w') {|f| f.write $options.to_yaml }
   end
 end
-
+p 'Loading config...'
 load_config
 
 OptionParser.new do |opts|
@@ -166,7 +168,7 @@ def gzip(tar_file)
   gz = StringIO.new
   level = $options['gzipCompression']
   level = 6 if level < 0 or level > 9
-  p level
+  #p level
 
   z = Zlib::GzipWriter.new(gz, level)
   z.write tar_file.string
@@ -185,7 +187,7 @@ end
 
 def create_patch(old_file, new_file, output_file)
 
-  command = %w(xdelta3.exe -f)
+  command = %w(xdelta3 -f)
   command += ['-e']
   command += ['-s', old_file] if File.file? old_file
   command += [new_file, output_file]
@@ -200,11 +202,13 @@ end
 unless Dir.exist?($options['directories']['old'])
   Dir.mkdir $options['directories']['old']
   p 'Old directory not Found! Creating...'
+  $error = true
 end
 
 unless Dir.exist?($options['directories']['new'])
   Dir.mkdir $options['directories']['new']
   p 'New directory not Found! Creating...'
+  $error = true
 end
 
 def clean_out_dir
@@ -213,105 +217,115 @@ def clean_out_dir
   Dir.mkdir($options['directories']['out']) unless Dir.exist?($options['directories']['out'])
 
 end
+unless $error
+  unless $options['createOnlyListFile']
+    p 'Cleaning output directories'
+    clean_out_dir
 
-unless $options['createOnlyListFile']
-  clean_out_dir
+    ## Clean Tmp directory
+    FileUtils.rm_rf('tmp/.', secure: true)
+    Dir.mkdir 'tmp/' unless Dir.exist?('tmp/')
 
-  ## Clean Tmp directory
-  FileUtils.rm_rf('tmp/.', secure: true)
-  Dir.mkdir 'tmp/' unless Dir.exist?('tmp/')
-
-
-  ## Recreate directory structure from new to tmp (Process no 1)
-  Dir.glob("#{$options['directories']['new']}/**/*").each do |f|
-    if File.directory?(f)
-      f = f.sub /^#{$options['directories']['new']}\//, ''
-      #puts "#{f}\n"
-      FileUtils.mkpath 'tmp/' + f
+    p 'Recreating directory structure...'
+    ## Recreate directory structure from new to tmp (Process no 1)
+    Dir.glob("#{$options['directories']['new']}/**/*").each do |f|
+      if File.directory?(f)
+        f = f.sub /^#{$options['directories']['new']}\//, ''
+        #puts "#{f}\n"
+        FileUtils.mkpath 'tmp/' + f
+      end
     end
   end
-end
 
-if $options['createListFile']
-  patched_files = Hash.new
+  if $options['createListFile']
+    patched_files = Hash.new
 
-  if $options['pack']
-    patched_files['version'] = $options['pack']
+    if $options['pack']
+      patched_files['version'] = $options['pack']
+    end
+
+    patched_files['updated'] = Array.new
+    patched_files['new'] = Array.new
+    patched_files['removed_directories'] = Array.new
+    patched_files['removed_files'] = Array.new
   end
 
-  patched_files['updated'] = Array.new
-  patched_files['new'] = Array.new
-  patched_files['removed_directories'] = Array.new
-  patched_files['removed_files'] = Array.new
-end
+  ## Check files
+  Dir.glob("#{$options['directories']['new']}/**/*").each do |f|
+    if File.file?(f)
+      f = f.sub /^#{$options['directories']['new']}\//, ''
+      #puts "#{f}\n"
+      if File.exist?($options['directories']['old'] + f) # If it exist in old - make delta file (Process no 3)
+        unless FileUtils.identical?($options['directories']['old'] + f, $options['directories']['new'] + f)
+          unless $options['createOnlyListFile']
+            p 'Creating patch: ' + f
+            create_patch $options['directories']['old'] + f, $options['directories']['new'] + f, $options['directories']['out'] + f + '.upd'
+          end
 
-## Check files
-Dir.glob("#{$options['directories']['new']}/**/*").each do |f|
-  if File.file?(f)
-    f = f.sub /^#{$options['directories']['new']}\//, ''
-    #puts "#{f}\n"
-    if File.exist?($options['directories']['old'] + f) # If it exist in old - make delta file (Process no 3)
-      unless FileUtils.identical?($options['directories']['old'] + f, $options['directories']['new'] + f)
+          if $options['createListFile']
+            patched_files['updated'].push f
+          end
+        end
+      else #If its not - copy file to tmp (Process no 1)
         unless $options['createOnlyListFile']
-          create_patch $options['directories']['old'] + f, $options['directories']['new'] + f, $options['directories']['out'] + f + '.upd'
+          FileUtils.cp $options['directories']['new'] + f, 'tmp/' + f
         end
 
         if $options['createListFile']
-          patched_files['updated'].push f
+          patched_files['new'].push f
         end
       end
-    else #If its not - copy file to tmp (Process no 1)
-      unless $options['createOnlyListFile']
-        FileUtils.cp $options['directories']['new'] + f, 'tmp/' + f
-      end
-
-      if $options['createListFile']
-        patched_files['new'].push f
-      end
-    end
-  end
-end
-
-## Look for removed files and directories
-if $options['createListFile']
-  Dir.glob("#{$options['directories']['old']}/**/*").each do |f|
-    f = f.sub /^#{$options['directories']['old']}\//, ''
-    if File.file?("#{$options['directories']['old']}/" + f) and not File.exist?($options['directories']['new'] + f)
-      patched_files['removed_files'].push f
-    elsif File.directory?("#{$options['directories']['old']}/" + f) and not Dir.exist?($options['directories']['new'] + f)
-      patched_files['removed_directories'].push f
     end
   end
 
-  File.open('patchedFiles.yaml', 'w') do |f|
-    f.write patched_files.to_yaml
-  end
-end
-
-## Compress tmp directory and remove it (Process no 2)
-unless $options['createOnlyListFile']
-  tar_gz $options['tarFileName'] + '.tar.gz', 'tmp/'
-  FileUtils.rm_r 'tmp/' if Dir.exist?('tmp/')
-end
-
-if $options['pack']
-  dir_name = 'p' + $options['pack'].gsub(/\./, '-')
-  if Dir.exist? dir_name
-    FileUtils.rm_rf(dir_name, secure:true)
-  end
-  Dir.mkdir(dir_name)
-
+  ## Look for removed files and directories
   if $options['createListFile']
-    FileUtils.copy 'patchedFiles.yaml', dir_name + '/'
+    p 'Creating file list...'
+    Dir.glob("#{$options['directories']['old']}/**/*").each do |f|
+      f = f.sub /^#{$options['directories']['old']}\//, ''
+      if File.file?("#{$options['directories']['old']}/" + f) and not File.exist?($options['directories']['new'] + f)
+        patched_files['removed_files'].push f
+      elsif File.directory?("#{$options['directories']['old']}/" + f) and not Dir.exist?($options['directories']['new'] + f)
+        patched_files['removed_directories'].push f
+      end
+    end
 
-    FileUtils.remove 'patchedFiles.yaml'
+    File.open('patchedFiles.yaml', 'w') do |f|
+      f.write patched_files.to_yaml
+    end
   end
 
+  ## Compress tmp directory and remove it (Process no 2)
   unless $options['createOnlyListFile']
-    FileUtils.copy_entry $options['directories']['out'], dir_name + '/files/'
-    FileUtils.copy $options['tarFileName'] + '.tar.gz', dir_name
-
-    clean_out_dir
-    FileUtils.remove $options['tarFileName'] + '.tar.gz'
+    p 'Compressing newFiles...'
+    tar_gz $options['tarFileName'] + '.tar.gz', 'tmp/'
+    FileUtils.rm_r 'tmp/' if Dir.exist?('tmp/')
   end
+
+  if $options['pack']
+    p 'Packing...'
+    dir_name = 'p' + $options['pack'].gsub(/\./, '-')
+    if Dir.exist? dir_name
+      FileUtils.rm_rf(dir_name, secure:true)
+    end
+    Dir.mkdir(dir_name)
+
+    if $options['createListFile']
+      FileUtils.copy 'patchedFiles.yaml', dir_name + '/'
+
+      FileUtils.remove 'patchedFiles.yaml'
+    end
+
+    unless $options['createOnlyListFile']
+      FileUtils.copy_entry $options['directories']['out'], dir_name + '/files/'
+      FileUtils.copy $options['tarFileName'] + '.tar.gz', dir_name
+
+      clean_out_dir
+      FileUtils.remove $options['tarFileName'] + '.tar.gz'
+    end
+  end
+
+  p 'Done.'
+else
+  p 'Error.'
 end
