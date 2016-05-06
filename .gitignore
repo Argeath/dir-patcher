@@ -54,3 +54,9 @@ fabric.properties
 
 *.upd
 p*-*/
+.idea/
+.bundle/
+new/*
+old/*
+out/*
+config.yaml
